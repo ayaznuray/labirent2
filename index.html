@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="UTF-8">
+<title>🐭 Labirent Ustası</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Fredoka+One&family=Nunito:wght@400;700;800&display=swap');
+*{margin:0;padding:0;box-sizing:border-box}
+:root{
+  --bg:#0e0e1a;--panel:#161628;
+  --accent:#f7c948;--red:#ff4d6d;--green:#4ecdc4;--purple:#b06cff;
+  --text:#eef2ff;
+}
+body{
+  font-family:'Nunito',sans-serif;background:var(--bg);color:var(--text);
+  min-height:100vh;display:flex;flex-direction:column;align-items:center;
+  padding:14px 10px;overflow-x:hidden;user-select:none;
+}
+h1{
+  font-family:'Fredoka One',cursive;font-size:2.2rem;position:relative;z-index:1;
+  background:linear-gradient(120deg,var(--accent),var(--green));
+  -webkit-background-clip:text;-webkit-text-fill-color:transparent;
+}
+.lvl-bar{display:flex;gap:7px;flex-wrap:wrap;justify-content:center;margin:15px 0;z-index:1}
+.lvl-btn{
+  font-family:'Fredoka One',cursive;font-size:.8rem;padding:7px 14px;
+  border-radius:50px;border:2px solid rgba(255,255,255,.07);
+  background:var(--panel);color:rgba(238,242,255,.35);cursor:pointer;
+}
+.lvl-btn.active{background:var(--accent);color:#1a1a2e;border-color:var(--accent)}
+.info-row{display:flex;gap:10px;margin-bottom:10px;z-index:1}
+.badge{
+  background:var(--panel);border:1.5px solid rgba(255,255,255,.06);
+  border-radius:12px;padding:6px 16px;font-size:.84rem;font-weight:700;
+}
+.wrap{position:relative;border-radius:16px;overflow:hidden;box-shadow:0 0 60px rgba(0,0,0,.6);z-index:1}
+canvas{display:block;cursor:none;background:#0b0b1a}
+.ovl{
+  position:absolute;inset:0;display:flex;flex-direction:column;
+  align-items:center;justify-content:center;gap:14px;
+  background:rgba(14,14,26,.95);z-index:10;
+}
+.ovl.off{display:none}
+.ob{
+  padding:11px 28px;border-radius:50px;border:none;
+  background:var(--green);color:#1a1a2e;
+  font-family:'Nunito',sans-serif;font-size:1rem;font-weight:800;cursor:pointer;
+}
+</style>
+</head>
+<body>
+
+<h1>🐭 Labirent Ustası</h1>
+
+<div class="lvl-bar" id="lvlBar"></div>
+
+<div class="info-row">
+  <div class="badge" style="color:var(--accent)">⏱ <span id="vTimer">0</span>s</div>
+  <div class="badge" style="color:var(--red)">💥 <span id="vCrash">0</span> Hata</div>
+</div>
+
+<div class="wrap">
+  <canvas id="c"></canvas>
+  <div class="ovl" id="ovl">
+    <div style="font-size:4rem">🐭</div>
+    <div style="font-size:1.8rem; font-family:'Fredoka One'">Hazır mısın?</div>
+    <button class="ob" onclick="startGame()">▶ Başlat</button>
+  </div>
+</div>
+
+<script>
+const LCFG=[
+  {id:1,name:'Çaylak',   cols:7, rows:6, cell:82,ww:16,ps:11,strict:false},
+  {id:2,name:'Öğrenci',  cols:9, rows:7, cell:70,ww:14,ps:9, strict:true},
+  {id:3,name:'Usta',     cols:11,rows:8, cell:62,ww:12,ps:8, strict:true},
+  {id:4,name:'Uzman',    cols:13,rows:9, cell:56,ww:11,ps:7, strict:true},
+  {id:5,name:'Efsane',   cols:15,rows:10,cell:50,ww:10,ps:6, strict:true}
+];
+
+let lvl=1, active=false, player={x:0,y:0}, mouse={x:0,y:0};
+let crashes=0, elapsed=0, timerInt=null, mazeWalls=[], exits=[], startPos={x:0,y:0};
+
+const canvas=document.getElementById('c'), ctx=canvas.getContext('2d');
+
+function cfg(){return LCFG[lvl-1]}
+
+// ── ORİJİNAL LABİRENT ALGORİTMASI ──
+function buildMaze(){
+  const {cols,rows,cell,ww}=cfg();
+  const grid=[];
+  for(let r=0;r<rows;r++){grid[r]=[];for(let col=0;col<cols;col++)grid[r][col]={n:true,e:true,s:true,w:true,vis:false}}
+
+  function carve(r,col){
+    grid[r][col].vis=true;
+    const dirs=[[0,-1,0],[1,0,1],[2,1,0],[3,0,-1]].sort(()=>Math.random()-0.5);
+    for(const [d,dr,dc] of dirs){
+      const nr=r+dr, nc=col+dc;
+      if(nr>=0&&nr<rows&&nc>=0&&nc<cols&&!grid[nr][nc].vis){
+        if(d===0){grid[r][col].n=false;grid[nr][nc].s=false}
+        if(d===1){grid[r][col].e=false;grid[nr][nc].w=false}
+        if(d===2){grid[r][col].s=false;grid[nr][nc].n=false}
+        if(d===3){grid[r][col].w=false;grid[nr][nc].e=false}
+        carve(nr,nc);
+      }
+    }
+  }
+  carve(0,0);
+
+  const walls=[];
+  for(let r=0;r<rows;r++){
+    for(let col=0;col<cols;col++){
+      const x=col*cell+ww/2, y=r*cell+ww/2;
+      if(grid[r][col].n) walls.push({x,y,w:cell+ww/2,h:ww});
+      if(grid[r][col].w) walls.push({x,y,w:ww,h:cell+ww/2});
+      if(r===rows-1&&grid[r][col].s) walls.push({x,y:y+cell,w:cell+ww/2,h:ww});
+      if(col===cols-1&&grid[r][col].e) walls.push({x:x+cell,y,w:ww,h:cell+ww/2});
+    }
+  }
+  return walls;
+}
+
+function initLevel(){
+  const c=cfg();
+  canvas.width=c.cols*c.cell+c.ww; canvas.height=c.rows*c.cell+c.ww;
+  mazeWalls=buildMaze();
+  startPos={x:c.ww/2+c.cell/2, y:c.ww/2+c.cell/2};
+  player={...startPos}; mouse={...startPos};
+  exits=[{cx:canvas.width-c.ww-c.cell/2, cy:canvas.height-c.ww-c.cell/2}];
+  crashes=0; elapsed=0; 
+  document.getElementById('vCrash').textContent="0";
+  document.getElementById('vTimer').textContent="0";
+  renderBar();
+}
+
+function loop(){
+  if(!active)return;
+  requestAnimationFrame(loop);
+  
+  ctx.fillStyle='#0b0b1a'; ctx.fillRect(0,0,canvas.width,canvas.height);
+  
+  // Duvarlar
+  ctx.fillStyle='#3535a0';
+  mazeWalls.forEach(w=>ctx.fillRect(w.x,w.y,w.w,w.h));
+
+  // Peynir
+  ctx.font='24px Arial'; ctx.fillText('🧀', exits[0].cx-12, exits[0].cy+10);
+
+  // Fare Hareketi
+  const c=cfg();
+  const dx=mouse.x-player.x, dy=mouse.y-player.y, dist=Math.hypot(dx,dy);
+  if(dist>1){
+    const spd=Math.min(dist, 5);
+    const nx=player.x+dx/dist*spd, ny=player.y+dy/dist*spd;
+    
+    let hit=false;
+    for(const w of mazeWalls) {
+      if(nx+c.ps > w.x && nx-c.ps < w.x+w.w && ny+c.ps > w.y && ny-c.ps < w.y+w.h) { hit=true; break; }
+    }
+
+    if(!hit) { player.x=nx; player.y=ny; }
+    else if(c.strict) { 
+      // HATA ANI: Sadece sessizce başa döner
+      player={...startPos}; crashes++; 
+      document.getElementById('vCrash').textContent=crashes;
+    }
+  }
+
+  ctx.font='28px Arial'; ctx.fillText('🐭', player.x-14, player.y+12);
+
+  // Kazanma Kontrolü
+  if(Math.hypot(player.x-exits[0].cx, player.y-exits[0].cy)<30){
+    active=false; alert("Tebrikler! Peynire ulaştın."); 
+    initLevel(); document.getElementById('ovl').classList.remove('off');
+  }
+}
+
+function startGame(){
+  document.getElementById('ovl').classList.add('off');
+  active=true;
+  if(timerInt) clearInterval(timerInt);
+  timerInt=setInterval(()=>{elapsed++; document.getElementById('vTimer').textContent=elapsed;},1000);
+  loop();
+}
+
+function renderBar(){
+  const bar=document.getElementById('lvlBar'); bar.innerHTML='';
+  LCFG.forEach(c=>{
+    const b=document.createElement('button'); b.className='lvl-btn'+(c.id===lvl?' active':'');
+    b.textContent='Seviye '+c.id;
+    b.onclick=()=>{ lvl=c.id; active=false; initLevel(); document.getElementById('ovl').classList.remove('off'); };
+    bar.appendChild(b);
+  });
+}
+
+canvas.addEventListener('mousemove',e=>{
+  const r=canvas.getBoundingClientRect();
+  mouse.x=(e.clientX-r.left)*(canvas.width/r.width);
+  mouse.y=(e.clientY-r.top)*(canvas.height/r.height);
+});
+
+initLevel();
+</script>
+</body>
+</html>
